@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Warehouse Leads Map Portal with Photon Geocoding</title>
+  <title>Warehouse Leads Map Portal with Google Geocoding</title>
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <!-- Leaflet-Geosearch CSS -->
@@ -98,21 +98,19 @@
       return [baseLat + (index * 0.005), baseLon + (index * 0.005)];
     }
 
-    // Geocode an address using the Photon API
+    // Geocode an address using the Google Maps Geocoding API
     function geocodeAddress(address) {
-      return fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(address))
+      return fetch('https://maps.googleapis.com/maps/api/geocode/json?address=' + encodeURIComponent(address) + '&key=AIzaSyBAEwkvlExAduFjlTmDpIBXFdmqKgJfamM')
         .then(function(response) { return response.json(); })
         .then(function(data) {
-          if (data.features && data.features.length > 0) {
-            // Photon returns GeoJSON features. Coordinates are [lon, lat]
-            var feature = data.features[0];
-            var coords = feature.geometry.coordinates;
-            return { lat: parseFloat(coords[1]), lon: parseFloat(coords[0]) };
+          if (data.results && data.results.length > 0) {
+            var location = data.results[0].geometry.location;
+            return { lat: location.lat, lon: location.lng };
           }
           return null;
         })
         .catch(function(err) {
-          console.error("Photon geocoding error:", err);
+          console.error("Google Geocoding error:", err);
           return null;
         });
     }
@@ -165,7 +163,7 @@
           if (!isNaN(lat) && !isNaN(lon)) {
             addMarker(row, lat, lon);
           } else {
-            // Use Photon to geocode the address if possible
+            // Use Google Geocoding to geocode the address if possible
             var address = row["Address"] || "";
             if (address) {
               geocodeAddress(address).then(function(coords) {
