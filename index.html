@@ -82,25 +82,31 @@
       return value && value.trim() !== '' && value.trim().toUpperCase() !== 'N/A';
     }
 
-    // Dummy geocoding function as a fallback (offset markers)
+    // Fallback dummy geocoding: offset markers slightly
     function getDummyCoordinates(index) {
       var baseLat = 32.08;
       var baseLon = -81.1;
       return [baseLat + (index * 0.005), baseLon + (index * 0.005)];
     }
 
-    // Function to geocode an address using Nominatim
+    // Geocode an address using Nominatim
     function geocodeAddress(address) {
       return fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address))
-        .then(function(response) {
-          return response.json();
-        })
+        .then(function(response) { return response.json(); })
         .then(function(data) {
           if (data && data.length > 0) {
-            return {
-              lat: parseFloat(data[0].lat),
-              lon: parseFloat(data[0].lon)
-            };
+            var result = data[0];
+            // If lat/lon are provided, use them.
+            if(result.lat && result.lon) {
+              return { lat: parseFloat(result.lat), lon: parseFloat(result.lon) };
+            } 
+            // Otherwise, compute centroid from bounding box if available.
+            else if(result.boundingbox) {
+              var bbox = result.boundingbox;
+              var computedLat = (parseFloat(bbox[0]) + parseFloat(bbox[1])) / 2;
+              var computedLon = (parseFloat(bbox[2]) + parseFloat(bbox[3])) / 2;
+              return { lat: computedLat, lon: computedLon };
+            }
           }
           return null;
         })
@@ -110,9 +116,8 @@
         });
     }
 
-    // Function to add a marker to the map
+    // Function to add a marker for a CSV row
     function addMarker(row, lat, lon) {
-      // Extract fields from CSV (adjust these if your CSV headers differ)
       var propertyName = row["Property Name"] || "Unnamed Property";
       var address      = row["Address"] || "";
       var phone        = row["Phone Number"] || "";
@@ -124,11 +129,11 @@
       var agentPhone   = row["Agent Phone"] || "";
       var agentEmail   = row["Agent Email"] || "";
 
-      // Determine marker color based on data completeness
+      // Determine marker color
       var hasManagementAndLeasing = isValid(propertyMgmt) && isValid(leasingAgent);
       var markerIcon = hasManagementAndLeasing ? greenIcon : yellowIcon;
 
-      // Construct the popup content
+      // Build popup content
       var popupContent = '<div class="popup-content">' +
         '<div class="popup-header">' + propertyName + '</div>' +
         '<div class="popup-section"><strong>Address:</strong> ' + address + '</div>' +
@@ -142,40 +147,37 @@
         (isValid(agentEmail) ? '<div class="popup-section"><strong>Agent Email:</strong> ' + agentEmail + '</div>' : '') +
         '</div>';
 
-      // Create and add marker to the map
       var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
       marker.bindPopup(popupContent);
     }
 
-    // Parse the CSV file from the same folder as index.html
+    // Parse the CSV from the same folder as index.html
     Papa.parse("warehouse leads - Sheet1.csv", {
       download: true,
       header: true,
       complete: function(results) {
         var data = results.data;
         data.forEach(function(row, index) {
-          // Check if Latitude and Longitude are provided in the CSV
+          // Check if coordinates are already provided
           var lat = parseFloat(row["Latitude"]);
           var lon = parseFloat(row["Longitude"]);
 
           if (!isNaN(lat) && !isNaN(lon)) {
-            // If coordinates exist, add marker immediately
             addMarker(row, lat, lon);
           } else {
-            // Otherwise, use Nominatim to geocode the address
+            // Use Nominatim to geocode the address
             var address = row["Address"] || "";
             if (address) {
               geocodeAddress(address).then(function(coords) {
                 if (coords) {
                   addMarker(row, coords.lat, coords.lon);
                 } else {
-                  // Fallback to dummy coordinates if geocoding fails
+                  // If geocoding fails, fallback to dummy coordinates
                   var dummyCoords = getDummyCoordinates(index);
                   addMarker(row, dummyCoords[0], dummyCoords[1]);
                 }
               });
             } else {
-              // If no address provided, use dummy coordinates
               var dummyCoords = getDummyCoordinates(index);
               addMarker(row, dummyCoords[0], dummyCoords[1]);
             }
