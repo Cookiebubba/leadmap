@@ -3,25 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Warehouse Leads Map Portal</title>
+  <title>Warehouse Leads Map Portal with Dynamic Address Search</title>
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Leaflet-Geosearch CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.0.0/dist/style.css" />
   <!-- PapaParse for CSV parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
-    /* Global Styles */
     body {
       margin: 0;
       padding: 0;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background-color: #f4f4f4;
     }
-    /* Full-screen Map */
     #map {
       height: 100vh;
       width: 100%;
     }
-    /* Popup Content Styling */
     .leaflet-popup-content {
       font-size: 14px;
       line-height: 1.5;
@@ -43,22 +42,33 @@
   </style>
 </head>
 <body>
-  <!-- Map Container -->
   <div id="map"></div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- Leaflet-Geosearch JS -->
+  <script src="https://unpkg.com/leaflet-geosearch@3.0.0/dist/bundle.min.js"></script>
   <script>
-    // Initialize the map – adjust center and zoom as needed
+    // Initialize the map
     var map = L.map('map').setView([32.08, -81.1], 8);
-
-    // Add OpenStreetMap tile layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // Define custom marker icons for green (complete info) and yellow (incomplete info)
+    // Add dynamic search control (using Leaflet-Geosearch with OSM)
+    const provider = new window.GeoSearch.OpenStreetMapProvider();
+    const searchControl = new window.GeoSearch.GeoSearchControl({
+      provider: provider,
+      style: 'bar',
+      showMarker: true,
+      retainZoomLevel: false,
+      autoClose: true,
+      searchLabel: 'Enter address',
+    });
+    map.addControl(searchControl);
+
+    // Define custom marker icons
     var greenIcon = new L.Icon({
       iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
@@ -77,31 +87,28 @@
       shadowSize: [41, 41]
     });
 
-    // Helper: Check if a field has a valid (non-empty and not "N/A") value.
+    // Helper function to check valid fields
     function isValid(value) {
       return value && value.trim() !== '' && value.trim().toUpperCase() !== 'N/A';
     }
 
-    // Fallback dummy geocoding: offset markers slightly
+    // Fallback dummy coordinates function
     function getDummyCoordinates(index) {
       var baseLat = 32.08;
       var baseLon = -81.1;
       return [baseLat + (index * 0.005), baseLon + (index * 0.005)];
     }
 
-    // Geocode an address using Nominatim
+    // Improved geocoding using Nominatim (with bounding box centroid calculation)
     function geocodeAddress(address) {
       return fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address))
         .then(function(response) { return response.json(); })
         .then(function(data) {
           if (data && data.length > 0) {
             var result = data[0];
-            // If lat/lon are provided, use them.
             if(result.lat && result.lon) {
               return { lat: parseFloat(result.lat), lon: parseFloat(result.lon) };
-            } 
-            // Otherwise, compute centroid from bounding box if available.
-            else if(result.boundingbox) {
+            } else if(result.boundingbox) {
               var bbox = result.boundingbox;
               var computedLat = (parseFloat(bbox[0]) + parseFloat(bbox[1])) / 2;
               var computedLon = (parseFloat(bbox[2]) + parseFloat(bbox[3])) / 2;
@@ -129,11 +136,9 @@
       var agentPhone   = row["Agent Phone"] || "";
       var agentEmail   = row["Agent Email"] || "";
 
-      // Determine marker color
       var hasManagementAndLeasing = isValid(propertyMgmt) && isValid(leasingAgent);
       var markerIcon = hasManagementAndLeasing ? greenIcon : yellowIcon;
 
-      // Build popup content
       var popupContent = '<div class="popup-content">' +
         '<div class="popup-header">' + propertyName + '</div>' +
         '<div class="popup-section"><strong>Address:</strong> ' + address + '</div>' +
@@ -151,28 +156,25 @@
       marker.bindPopup(popupContent);
     }
 
-    // Parse the CSV from the same folder as index.html
+    // Load CSV data and plot markers
     Papa.parse("warehouse leads - Sheet1.csv", {
       download: true,
       header: true,
       complete: function(results) {
         var data = results.data;
         data.forEach(function(row, index) {
-          // Check if coordinates are already provided
           var lat = parseFloat(row["Latitude"]);
           var lon = parseFloat(row["Longitude"]);
 
           if (!isNaN(lat) && !isNaN(lon)) {
             addMarker(row, lat, lon);
           } else {
-            // Use Nominatim to geocode the address
             var address = row["Address"] || "";
             if (address) {
               geocodeAddress(address).then(function(coords) {
                 if (coords) {
                   addMarker(row, coords.lat, coords.lon);
                 } else {
-                  // If geocoding fails, fallback to dummy coordinates
                   var dummyCoords = getDummyCoordinates(index);
                   addMarker(row, dummyCoords[0], dummyCoords[1]);
                 }
