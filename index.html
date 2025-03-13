@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Warehouse Leads Map Portal with Dynamic Address Search</title>
+  <title>Warehouse Leads Map Portal with Photon Geocoding</title>
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <!-- Leaflet-Geosearch CSS -->
@@ -56,15 +56,15 @@
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // Add dynamic search control (using Leaflet-Geosearch with OSM)
-    const provider = new window.GeoSearch.OpenStreetMapProvider();
+    // Add dynamic search control using Leaflet-Geosearch (default provider uses Nominatim; for Photon, see below)
+    const searchProvider = new window.GeoSearch.OpenStreetMapProvider();
     const searchControl = new window.GeoSearch.GeoSearchControl({
-      provider: provider,
+      provider: searchProvider,
       style: 'bar',
       showMarker: true,
       retainZoomLevel: false,
       autoClose: true,
-      searchLabel: 'Enter address',
+      searchLabel: 'Enter address'
     });
     map.addControl(searchControl);
 
@@ -77,7 +77,6 @@
       popupAnchor: [1, -34],
       shadowSize: [41, 41]
     });
-
     var yellowIcon = new L.Icon({
       iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-yellow.png',
       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
@@ -87,43 +86,38 @@
       shadowSize: [41, 41]
     });
 
-    // Helper function to check valid fields
+    // Helper: Check if a field is valid (non-empty and not "N/A")
     function isValid(value) {
       return value && value.trim() !== '' && value.trim().toUpperCase() !== 'N/A';
     }
 
-    // Fallback dummy coordinates function
+    // Fallback: Dummy coordinates (for when geocoding fails)
     function getDummyCoordinates(index) {
       var baseLat = 32.08;
       var baseLon = -81.1;
       return [baseLat + (index * 0.005), baseLon + (index * 0.005)];
     }
 
-    // Improved geocoding using Nominatim (with bounding box centroid calculation)
+    // Geocode an address using the Photon API
     function geocodeAddress(address) {
-      return fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address))
+      return fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(address))
         .then(function(response) { return response.json(); })
         .then(function(data) {
-          if (data && data.length > 0) {
-            var result = data[0];
-            if(result.lat && result.lon) {
-              return { lat: parseFloat(result.lat), lon: parseFloat(result.lon) };
-            } else if(result.boundingbox) {
-              var bbox = result.boundingbox;
-              var computedLat = (parseFloat(bbox[0]) + parseFloat(bbox[1])) / 2;
-              var computedLon = (parseFloat(bbox[2]) + parseFloat(bbox[3])) / 2;
-              return { lat: computedLat, lon: computedLon };
-            }
+          if (data.features && data.features.length > 0) {
+            // Photon returns GeoJSON features. Coordinates are [lon, lat]
+            var feature = data.features[0];
+            var coords = feature.geometry.coordinates;
+            return { lat: parseFloat(coords[1]), lon: parseFloat(coords[0]) };
           }
           return null;
         })
         .catch(function(err) {
-          console.error('Geocoding error:', err);
+          console.error("Photon geocoding error:", err);
           return null;
         });
     }
 
-    // Function to add a marker for a CSV row
+    // Function to add a marker based on CSV row data and coordinates
     function addMarker(row, lat, lon) {
       var propertyName = row["Property Name"] || "Unnamed Property";
       var address      = row["Address"] || "";
@@ -136,9 +130,11 @@
       var agentPhone   = row["Agent Phone"] || "";
       var agentEmail   = row["Agent Email"] || "";
 
+      // Choose marker color based on data completeness
       var hasManagementAndLeasing = isValid(propertyMgmt) && isValid(leasingAgent);
       var markerIcon = hasManagementAndLeasing ? greenIcon : yellowIcon;
 
+      // Build popup content
       var popupContent = '<div class="popup-content">' +
         '<div class="popup-header">' + propertyName + '</div>' +
         '<div class="popup-section"><strong>Address:</strong> ' + address + '</div>' +
@@ -163,18 +159,20 @@
       complete: function(results) {
         var data = results.data;
         data.forEach(function(row, index) {
+          // Check if CSV provides Latitude/Longitude
           var lat = parseFloat(row["Latitude"]);
           var lon = parseFloat(row["Longitude"]);
-
           if (!isNaN(lat) && !isNaN(lon)) {
             addMarker(row, lat, lon);
           } else {
+            // Use Photon to geocode the address if possible
             var address = row["Address"] || "";
             if (address) {
               geocodeAddress(address).then(function(coords) {
                 if (coords) {
                   addMarker(row, coords.lat, coords.lon);
                 } else {
+                  // Fallback to dummy coordinates if geocoding fails
                   var dummyCoords = getDummyCoordinates(index);
                   addMarker(row, dummyCoords[0], dummyCoords[1]);
                 }
