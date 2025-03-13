@@ -82,71 +82,104 @@
       return value && value.trim() !== '' && value.trim().toUpperCase() !== 'N/A';
     }
 
-    // Dummy geocoding function: If CSV rows do not have Latitude/Longitude, 
-    // this function offsets from a base coordinate based on the index.
-    // Replace this with a proper geocoding API for production use.
+    // Dummy geocoding function as a fallback (offset markers)
     function getDummyCoordinates(index) {
       var baseLat = 32.08;
       var baseLon = -81.1;
-      // Offset each subsequent marker by a tiny amount so they are visible
       return [baseLat + (index * 0.005), baseLon + (index * 0.005)];
     }
 
-    // Load CSV file from the same folder as index.html
+    // Function to geocode an address using Nominatim
+    function geocodeAddress(address) {
+      return fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address))
+        .then(function(response) {
+          return response.json();
+        })
+        .then(function(data) {
+          if (data && data.length > 0) {
+            return {
+              lat: parseFloat(data[0].lat),
+              lon: parseFloat(data[0].lon)
+            };
+          }
+          return null;
+        })
+        .catch(function(err) {
+          console.error('Geocoding error:', err);
+          return null;
+        });
+    }
+
+    // Function to add a marker to the map
+    function addMarker(row, lat, lon) {
+      // Extract fields from CSV (adjust these if your CSV headers differ)
+      var propertyName = row["Property Name"] || "Unnamed Property";
+      var address      = row["Address"] || "";
+      var phone        = row["Phone Number"] || "";
+      var website      = row["Website"] || "";
+      var propertyMgmt = row["Property Mgmt Company"] || "";
+      var mgmtPhone    = row["Mgmt Phone"] || "";
+      var mgmtEmail    = row["Mgmt Email"] || "";
+      var leasingAgent = row["Leasing Agent"] || "";
+      var agentPhone   = row["Agent Phone"] || "";
+      var agentEmail   = row["Agent Email"] || "";
+
+      // Determine marker color based on data completeness
+      var hasManagementAndLeasing = isValid(propertyMgmt) && isValid(leasingAgent);
+      var markerIcon = hasManagementAndLeasing ? greenIcon : yellowIcon;
+
+      // Construct the popup content
+      var popupContent = '<div class="popup-content">' +
+        '<div class="popup-header">' + propertyName + '</div>' +
+        '<div class="popup-section"><strong>Address:</strong> ' + address + '</div>' +
+        '<div class="popup-section"><strong>Phone:</strong> ' + phone + '</div>' +
+        (website ? '<div class="popup-section"><strong>Website:</strong> <a href="http://' + website + '" target="_blank">' + website + '</a></div>' : '') +
+        (isValid(propertyMgmt) ? '<div class="popup-section"><strong>Property Management:</strong> ' + propertyMgmt + '</div>' : '') +
+        (isValid(mgmtPhone) ? '<div class="popup-section"><strong>Mgmt Phone:</strong> ' + mgmtPhone + '</div>' : '') +
+        (isValid(mgmtEmail) ? '<div class="popup-section"><strong>Mgmt Email:</strong> ' + mgmtEmail + '</div>' : '') +
+        (isValid(leasingAgent) ? '<div class="popup-section"><strong>Leasing Agent:</strong> ' + leasingAgent + '</div>' : '') +
+        (isValid(agentPhone) ? '<div class="popup-section"><strong>Agent Phone:</strong> ' + agentPhone + '</div>' : '') +
+        (isValid(agentEmail) ? '<div class="popup-section"><strong>Agent Email:</strong> ' + agentEmail + '</div>' : '') +
+        '</div>';
+
+      // Create and add marker to the map
+      var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
+      marker.bindPopup(popupContent);
+    }
+
+    // Parse the CSV file from the same folder as index.html
     Papa.parse("warehouse leads - Sheet1.csv", {
       download: true,
       header: true,
       complete: function(results) {
         var data = results.data;
-        // Loop over each CSV row
         data.forEach(function(row, index) {
-          // Extract fields from CSV (adjust these if your CSV headers differ)
-          var propertyName     = row["Property Name"] || "Unnamed Property";
-          var address          = row["Address"] || "";
-          var phone            = row["Phone Number"] || "";
-          var website          = row["Website"] || "";
-          var propertyMgmt     = row["Property Mgmt Company"] || "";
-          var mgmtPhone        = row["Mgmt Phone"] || "";
-          var mgmtEmail        = row["Mgmt Email"] || "";
-          var mgmtAddress      = row["Mgmt Address"] || "";
-          var leasingAgent     = row["Leasing Agent"] || "";
-          var agentPhone       = row["Agent Phone"] || "";
-          var agentEmail       = row["Agent Email"] || "";
-          var agentAddress     = row["Agent Address"] || "";
-          var agentWebsite     = row["Agent Website"] || "";
-
-          // Determine marker color:
-          // If both property management and leasing agent info are valid, use green; otherwise, yellow.
-          var hasManagementAndLeasing = isValid(propertyMgmt) && isValid(leasingAgent);
-          var markerIcon = hasManagementAndLeasing ? greenIcon : yellowIcon;
-
-          // Determine coordinates:
-          // Use CSV "Latitude" and "Longitude" if available; otherwise, use dummy coordinates.
+          // Check if Latitude and Longitude are provided in the CSV
           var lat = parseFloat(row["Latitude"]);
           var lon = parseFloat(row["Longitude"]);
-          if (isNaN(lat) || isNaN(lon)) {
-            var coords = getDummyCoordinates(index);
-            lat = coords[0];
-            lon = coords[1];
+
+          if (!isNaN(lat) && !isNaN(lon)) {
+            // If coordinates exist, add marker immediately
+            addMarker(row, lat, lon);
+          } else {
+            // Otherwise, use Nominatim to geocode the address
+            var address = row["Address"] || "";
+            if (address) {
+              geocodeAddress(address).then(function(coords) {
+                if (coords) {
+                  addMarker(row, coords.lat, coords.lon);
+                } else {
+                  // Fallback to dummy coordinates if geocoding fails
+                  var dummyCoords = getDummyCoordinates(index);
+                  addMarker(row, dummyCoords[0], dummyCoords[1]);
+                }
+              });
+            } else {
+              // If no address provided, use dummy coordinates
+              var dummyCoords = getDummyCoordinates(index);
+              addMarker(row, dummyCoords[0], dummyCoords[1]);
+            }
           }
-
-          // Construct popup content with property details
-          var popupContent = '<div class="popup-content">' +
-            '<div class="popup-header">' + propertyName + '</div>' +
-            '<div class="popup-section"><strong>Address:</strong> ' + address + '</div>' +
-            '<div class="popup-section"><strong>Phone:</strong> ' + phone + '</div>' +
-            (website ? '<div class="popup-section"><strong>Website:</strong> <a href="http://' + website + '" target="_blank">' + website + '</a></div>' : '') +
-            (isValid(propertyMgmt) ? '<div class="popup-section"><strong>Property Management:</strong> ' + propertyMgmt + '</div>' : '') +
-            (isValid(mgmtPhone) ? '<div class="popup-section"><strong>Mgmt Phone:</strong> ' + mgmtPhone + '</div>' : '') +
-            (isValid(mgmtEmail) ? '<div class="popup-section"><strong>Mgmt Email:</strong> ' + mgmtEmail + '</div>' : '') +
-            (isValid(leasingAgent) ? '<div class="popup-section"><strong>Leasing Agent:</strong> ' + leasingAgent + '</div>' : '') +
-            (isValid(agentPhone) ? '<div class="popup-section"><strong>Agent Phone:</strong> ' + agentPhone + '</div>' : '') +
-            (isValid(agentEmail) ? '<div class="popup-section"><strong>Agent Email:</strong> ' + agentEmail + '</div>' : '') +
-            '</div>';
-
-          // Create and add marker to the map
-          var marker = L.marker([lat, lon], { icon: markerIcon }).addTo(map);
-          marker.bindPopup(popupContent);
         });
       },
       error: function(err) {
